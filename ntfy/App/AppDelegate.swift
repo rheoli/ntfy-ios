@@ -1,10 +1,8 @@
 import UIKit
 import SafariServices
 import UserNotifications
-import Firebase
-import FirebaseCore
-import FirebaseMessaging
 import CoreData
+import Foundation
 
 class AppDelegate: UIResponder, UIApplicationDelegate, ObservableObject {
     private let tag = "AppDelegate"
@@ -16,13 +14,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, ObservableObject {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         Log.d(tag, "Launching AppDelegate")
 
-        FirebaseApp.configure()
-        FirebaseConfiguration.shared.setLoggerLevel(.max)
-
         // Register app permissions for push notifications
         UNUserNotificationCenter.current().delegate = self
-        Messaging.messaging().delegate = self
-        
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { success, error in
             guard success else {
                 Log.e(self.tag, "Failed to register for local push notifications", error)
@@ -64,8 +57,55 @@ class AppDelegate: UIResponder, UIApplicationDelegate, ObservableObject {
     
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { data in String(format: "%02.2hhx", data) }.joined()
-        Messaging.messaging().apnsToken = deviceToken
+        //Messaging.messaging().apnsToken = deviceToken
         Log.d(tag, "Registered for remote notifications. Passing APNs token to Firebase: \(token)")
+        
+        let apiUrlString = "https://pkg.rheoli.net"
+        if let apiUrl = URL(string: apiUrlString) {
+            
+            // Create a URLSession instance
+            let session = URLSession.shared
+            
+            // Define the data you want to upload
+            let jsonPayload = ["device": token]
+            
+            // Convert the JSON payload to Data
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: jsonPayload, options: [])
+                
+                // Create a URLRequest with the URL and set the HTTP method to POST
+                var request = URLRequest(url: apiUrl)
+                request.httpMethod = "POST"
+                request.httpBody = jsonData
+                
+                // Create an upload task using URLSessionUploadTask
+                let uploadTask = session.uploadTask(with: request, from: jsonData) { (data, response, error) in
+                    // Handle the response here
+                    
+                    // Check for errors if received from server
+                    if let error = error {
+                        print("Error: \(error)")
+                        return
+                    }
+                    
+                    // Check if data is available
+                    if let responseData = data {
+                        // Process the response data as needed
+                        let responseString = String(data: responseData, encoding: .utf8)
+                        print("Response: \(responseString ?? "No response data")")
+                    }
+                }
+                
+                // Resume the upload task to initiate the request
+                uploadTask.resume()
+                
+            } catch {
+                print("Error in JSON data: \(error)")
+            }
+            
+        } else {
+            print("URL is invalid")
+        }
     }
     
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -133,24 +173,3 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     }
 }
 
-extension AppDelegate: MessagingDelegate {
-    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
-        Log.d(tag, "Firebase token received: \(String(describing: fcmToken))")
-        
-        // Subscribe to ~poll topic
-        Messaging.messaging().subscribe(toTopic: pollTopic)
-        
-        // Re-subscribe to Firebase for all topics
-        let store = Store.shared
-        store.getSubscriptions()?.forEach{ subscription in
-            if let baseUrl = subscription.baseUrl, let topic = subscription.topic {
-                Log.d(tag, "Re-subscribing to topic \(baseUrl)/\(topic)")
-                if baseUrl == Config.appBaseUrl {
-                    Messaging.messaging().subscribe(toTopic: topic)
-                } else {
-                    Messaging.messaging().subscribe(toTopic: topicHash(baseUrl: baseUrl, topic: topic))
-                }
-            }
-        }
-    }
-}

@@ -1,5 +1,4 @@
 import SwiftUI
-import Firebase
 
 // TODO: Errors are not shown to the user, but instead just logged
 
